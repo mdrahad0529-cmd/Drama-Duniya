@@ -1,0 +1,46 @@
+{
+  "collections": {
+    "movies": {
+      "description": "Stores movies, dramas, views, and their embedded comments",
+      "documents": {
+        "m-timestamp": {
+          "id": "string",
+          "title": "string",
+          "description": "string",
+          "imageUrl": "string",
+          "bannerUrl": "string",
+          "category": "string",
+          "releaseYear": "number",
+          "rating": "number",
+          "quality": "string",
+          "size": "string",
+          "language": "string",
+          "duration": "string",
+          "director": "string",
+          "cast": "array of strings",
+          "downloadLinks": [
+            {
+              "id": "string",
+              "label": "string",
+              "url": "string",
+              "size": "string"
+            }
+          ],
+          "comments": [
+            {
+              "id": "string",
+              "userName": "string",
+              "userEmail": "string (optional)",
+              "text": "string",
+              "rating": "number (optional)",
+              "timestamp": "string (ISO)",
+              "isAdmin": "boolean (optional)"
+            }
+          ],
+          "featured": "boolean (optional)",
+          "views": "number"
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Film, Search, Settings, ShieldCheck, LogOut } from "lucide-react";
 
 interface HeaderProps {
@@ -16,6 +16,23 @@ export default function Header({
   setIsAdminMode,
   moviesCount
 }: HeaderProps) {
+  const [localSearch, setLocalSearch] = useState(searchQuery);
+
+  // Sync local search input with global search state (e.g. if cleared from outside)
+  useEffect(() => {
+    setLocalSearch(searchQuery);
+  }, [searchQuery]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchQuery(localSearch);
+  };
+
+  const handleClear = () => {
+    setLocalSearch("");
+    setSearchQuery("");
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
@@ -42,27 +59,36 @@ export default function Header({
 
         {/* Global Search Bar (hidden when in admin mode) */}
         {!isAdminMode && (
-          <div className="relative mx-4 hidden max-w-md flex-1 sm:block">
+          <form onSubmit={handleSearchSubmit} className="relative mx-4 hidden max-w-md flex-1 sm:block">
             <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
               <Search className="h-4 w-4 text-slate-400" />
             </div>
             <input
               type="text"
               placeholder="Search movies, cast, or directors..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-slate-800 bg-slate-900/50 py-2 pl-10 pr-4 text-sm text-slate-200 placeholder-slate-500 outline-none transition-all focus:border-amber-500 focus:bg-slate-900 focus:ring-1 focus:ring-amber-500"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              className="w-full rounded-xl border border-slate-800 bg-slate-900/50 py-2.5 pl-10 pr-24 text-sm text-slate-200 placeholder-slate-500 outline-none transition-all focus:border-amber-500 focus:bg-slate-900 focus:ring-1 focus:ring-amber-500"
               id="search-input"
             />
-            {searchQuery && (
+            <div className="absolute inset-y-0 right-1.5 flex items-center space-x-1 py-1">
+              {localSearch && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="px-1.5 py-1 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
               <button
-                onClick={() => setSearchQuery("")}
-                className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-slate-500 hover:text-slate-300"
+                type="submit"
+                className="rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-slate-950 transition-all hover:bg-amber-400 hover:shadow-md hover:shadow-amber-500/10 active:scale-95"
               >
-                Clear
+                Search
               </button>
-            )}
-          </div>
+            </div>
+          </form>
         )}
 
         {/* Right Actions */}
@@ -89,19 +115,36 @@ export default function Header({
       {/* Mobile Search Bar (Only visible in User Mode) */}
       {!isAdminMode && (
         <div className="border-t border-slate-900 px-4 py-2.5 sm:hidden">
-          <div className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <Search className="h-4 w-4 text-slate-400" />
+          <form onSubmit={handleSearchSubmit} className="relative flex items-center space-x-2">
+            <div className="relative flex-1">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <Search className="h-4 w-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search movies or cast..."
+                value={localSearch}
+                onChange={(e) => setLocalSearch(e.target.value)}
+                className="w-full rounded-lg border border-slate-800 bg-slate-900/80 py-2 pl-9 pr-14 text-xs text-slate-200 placeholder-slate-500 outline-none transition-all focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                id="mobile-search-input"
+              />
+              {localSearch && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="absolute inset-y-0 right-2 flex items-center text-[10px] font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Clear
+                </button>
+              )}
             </div>
-            <input
-              type="text"
-              placeholder="Search movies or cast..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-slate-800 bg-slate-900/80 py-2 pl-9 pr-4 text-xs text-slate-200 placeholder-slate-500 outline-none transition-all focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-              id="mobile-search-input"
-            />
-          </div>
+            <button
+              type="submit"
+              className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-amber-400 active:scale-95"
+            >
+              Search
+            </button>
+          </form>
         </div>
       )}
     </header>

@@ -5,6 +5,15 @@ import Header from "./components/Header";
 import MovieCard from "./components/MovieCard";
 import MovieDetailsModal from "./components/MovieDetailsModal";
 import AdminPanel from "./components/AdminPanel";
+import {
+  seedMoviesIfEmpty,
+  subscribeToMovies,
+  addFirestoreMovie,
+  updateFirestoreMovie,
+  deleteFirestoreMovie,
+  incrementMovieViews,
+  updateMovieCommentsAndRating
+} from "./firebase";
 import { Film, Play, Flame, Star, Compass, Download, ShieldCheck, Heart, AlertTriangle, X, Lock, Facebook, Users, Megaphone, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -14,6 +23,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Admin PIN modal states
   const [showAdminPINModal, setShowAdminPINModal] = useState(false);
@@ -33,22 +43,43 @@ export default function App() {
   };
 
 
-  // Load from local storage or set initial data
+  // Load from Firebase and seed if empty
   useEffect(() => {
-    const saved = localStorage.getItem("deama_duniya_movies");
-    if (saved) {
-      try {
-        setMovies(JSON.parse(saved));
-      } catch (e) {
-        console.error("Error reading saved movies, restoring defaults", e);
-        setMovies(INITIAL_MOVIES);
-        localStorage.setItem("deama_duniya_movies", JSON.stringify(INITIAL_MOVIES));
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const initFirebase = async () => {
+      await seedMoviesIfEmpty();
+      if (!active) return;
+
+      unsubscribe = subscribeToMovies((fetchedMovies) => {
+        setMovies(fetchedMovies);
+        setIsLoading(false);
+      });
+    };
+
+    initFirebase();
+
+    return () => {
+      active = false;
+      if (unsubscribe) {
+        unsubscribe();
       }
-    } else {
-      setMovies(INITIAL_MOVIES);
-      localStorage.setItem("deama_duniya_movies", JSON.stringify(INITIAL_MOVIES));
-    }
+    };
   }, []);
+
+  // Keep selectedMovie in sync with the live movies state
+  useEffect(() => {
+    if (selectedMovie) {
+      const current = movies.find((m) => m.id === selectedMovie.id);
+      if (current) {
+        setSelectedMovie(current);
+      } else {
+        // If the movie was deleted, close details modal
+        setSelectedMovie(null);
+      }
+    }
+  }, [movies]);
 
   // Ad verification state for Home Page (Opening movie detail pages)
   const [homeAdClicks, setHomeAdClicks] = useState(0);
@@ -155,17 +186,15 @@ export default function App() {
     setPendingMovieToSelect(movie);
   };
 
-  const triggerSelectMovie = (movie: Movie) => {
-    const updated = movies.map((m) => {
-      if (m.id === movie.id) {
-        const updatedMovie = { ...m, views: (m.views || 0) + 1 };
-        setSelectedMovie(updatedMovie);
-        return updatedMovie;
-      }
-      return m;
-    });
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
+  const triggerSelectMovie = async (movie: Movie) => {
+    // Optimistically update views locally, and run increment on Firestore
+    const updatedMovie = { ...movie, views: (movie.views || 0) + 1 };
+    setSelectedMovie(updatedMovie);
+    try {
+      await incrementMovieViews(movie.id);
+    } catch (e) {
+      console.error("Error updating views in Firestore: ", e);
+    }
   };
 
   const handleHomeAdClick = () => {
@@ -181,114 +210,109 @@ export default function App() {
   };
 
   // Add Comment & Rating - and automatically update Movie Average Rating
-  const handleAddComment = (movieId: string, commentData: Omit<Comment, "id" | "timestamp">) => {
-    const updated = movies.map((movie) => {
-      if (movie.id === movieId) {
-        const newComment: Comment = {
-          ...commentData,
-          id: "c-" + Date.now(),
-          timestamp: new Date().toISOString()
-        };
+  const handleAddComment = async (movieId: string, commentData: Omit<Comment, "id" | "timestamp">) => {
+    const movie = movies.find((m) => m.id === movieId);
+    if (!movie) return;
 
-        const updatedComments = [...(movie.comments || []), newComment];
-        
-        // Recalculate average rating based on comments that contain ratings
-        const ratedComments = updatedComments.filter((c) => typeof c.rating === "number");
-        let newRating = movie.rating;
-        if (ratedComments.length > 0) {
-          const sum = ratedComments.reduce((acc, c) => acc + (c.rating || 5), 0);
-          newRating = Number((sum / ratedComments.length).toFixed(1));
-        }
+    const newComment: Comment = {
+      ...commentData,
+      id: "c-" + Date.now(),
+      timestamp: new Date().toISOString()
+    };
 
-        const updatedMovie = {
-          ...movie,
-          comments: updatedComments,
-          rating: newRating
-        };
+    const updatedComments = [...(movie.comments || []), newComment];
+    
+    // Recalculate average rating based on comments that contain ratings
+    const ratedComments = updatedComments.filter((c) => typeof c.rating === "number");
+    let newRating = movie.rating;
+    if (ratedComments.length > 0) {
+      const sum = ratedComments.reduce((acc, c) => acc + (c.rating || 5), 0);
+      newRating = Number((sum / ratedComments.length).toFixed(1));
+    }
 
-        // If currently open in modal, keep modal state up to date
-        if (selectedMovie && selectedMovie.id === movieId) {
-          setSelectedMovie(updatedMovie);
-        }
+    const updatedMovie = {
+      ...movie,
+      comments: updatedComments,
+      rating: newRating
+    };
 
-        return updatedMovie;
-      }
-      return movie;
-    });
+    // Keep modal state updated immediately
+    if (selectedMovie && selectedMovie.id === movieId) {
+      setSelectedMovie(updatedMovie);
+    }
 
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
+    try {
+      await updateMovieCommentsAndRating(movieId, updatedComments, newRating);
+    } catch (e) {
+      console.error("Error saving comment to Firestore: ", e);
+    }
   };
 
   // Admin: Add a new movie
-  const handleAddMovie = (newMovieData: Omit<Movie, "id" | "comments" | "views">) => {
-    const newMovie: Movie = {
-      ...newMovieData,
-      id: "m-" + Date.now(),
-      views: 0,
-      comments: []
-    };
-
-    const updated = [newMovie, ...movies];
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
+  const handleAddMovie = async (newMovieData: Omit<Movie, "id" | "comments" | "views">) => {
+    try {
+      await addFirestoreMovie(newMovieData);
+    } catch (e) {
+      console.error("Error adding movie to Firestore: ", e);
+    }
   };
 
   // Admin: Edit movie info
-  const handleEditMovie = (updatedMovie: Movie) => {
-    const updated = movies.map((m) => (m.id === updatedMovie.id ? updatedMovie : m));
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
-    
-    // Also update selected if open
-    if (selectedMovie && selectedMovie.id === updatedMovie.id) {
-      setSelectedMovie(updatedMovie);
+  const handleEditMovie = async (updatedMovie: Movie) => {
+    try {
+      await updateFirestoreMovie(updatedMovie);
+      if (selectedMovie && selectedMovie.id === updatedMovie.id) {
+        setSelectedMovie(updatedMovie);
+      }
+    } catch (e) {
+      console.error("Error editing movie in Firestore: ", e);
     }
   };
 
   // Admin: Delete a movie
-  const handleDeleteMovie = (id: string) => {
-    const updated = movies.filter((m) => m.id !== id);
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
-    if (selectedMovie?.id === id) {
-      setSelectedMovie(null);
+  const handleDeleteMovie = async (id: string) => {
+    try {
+      await deleteFirestoreMovie(id);
+      if (selectedMovie?.id === id) {
+        setSelectedMovie(null);
+      }
+    } catch (e) {
+      console.error("Error deleting movie from Firestore: ", e);
     }
   };
 
   // Admin: Delete a comment globally
-  const handleDeleteComment = (movieId: string, commentId: string) => {
-    const updated = movies.map((movie) => {
-      if (movie.id === movieId) {
-        const updatedComments = movie.comments.filter((c) => c.id !== commentId);
-        
-        // Recalculate average rating
-        const ratedComments = updatedComments.filter((c) => typeof c.rating === "number");
-        let newRating = 5.0;
-        if (ratedComments.length > 0) {
-          const sum = ratedComments.reduce((acc, c) => acc + (c.rating || 5), 0);
-          newRating = Number((sum / ratedComments.length).toFixed(1));
-        } else {
-          newRating = 5.0;
-        }
+  const handleDeleteComment = async (movieId: string, commentId: string) => {
+    const movie = movies.find((m) => m.id === movieId);
+    if (!movie) return;
 
-        const updatedMovie = {
-          ...movie,
-          comments: updatedComments,
-          rating: newRating
-        };
+    const updatedComments = movie.comments.filter((c) => c.id !== commentId);
+    
+    // Recalculate average rating
+    const ratedComments = updatedComments.filter((c) => typeof c.rating === "number");
+    let newRating = 5.0;
+    if (ratedComments.length > 0) {
+      const sum = ratedComments.reduce((acc, c) => acc + (c.rating || 5), 0);
+      newRating = Number((sum / ratedComments.length).toFixed(1));
+    } else {
+      newRating = 5.0;
+    }
 
-        if (selectedMovie && selectedMovie.id === movieId) {
-          setSelectedMovie(updatedMovie);
-        }
+    const updatedMovie = {
+      ...movie,
+      comments: updatedComments,
+      rating: newRating
+    };
 
-        return updatedMovie;
-      }
-      return movie;
-    });
+    if (selectedMovie && selectedMovie.id === movieId) {
+      setSelectedMovie(updatedMovie);
+    }
 
-    setMovies(updated);
-    localStorage.setItem("deama_duniya_movies", JSON.stringify(updated));
+    try {
+      await updateMovieCommentsAndRating(movieId, updatedComments, newRating);
+    } catch (e) {
+      console.error("Error deleting comment from Firestore: ", e);
+    }
   };
 
   // Filter & Search Logic
@@ -325,7 +349,12 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 pb-16">
-        {isAdminMode ? (
+        {isLoading ? (
+          <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+            <Loader2 className="h-10 w-10 text-amber-500 animate-spin" />
+            <p className="text-sm text-slate-400 font-medium animate-pulse">Loading Drama Duniya database...</p>
+          </div>
+        ) : isAdminMode ? (
           /* Admin Controller Dashboard Mode */
           <div className="animate-in fade-in duration-300">
             <AdminPanel
